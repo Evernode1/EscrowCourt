@@ -54,12 +54,17 @@ app.get('/deal-contract-source', (_req, res) => {
   res.type('text/plain').send(fs.readFileSync(path.join(__dirname, '../contracts/deal.py'), 'utf-8'));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`EscrowCourt server listening on port ${PORT}`);
-  if (!REGISTRY_ADDRESS) {
-    console.warn('WARNING: REGISTRY_ADDRESS is not set. Deploy contracts/registry.py first, then set REGISTRY_ADDRESS.');
-  }
-});
+// On Vercel, this file is required by api/index.js and the platform
+// handles incoming requests itself — it doesn't need (or want) us to
+// bind a local port. Only listen when running locally / on a normal host.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`EscrowCourt server listening on port ${PORT}`);
+    if (!REGISTRY_ADDRESS) {
+      console.warn('WARNING: REGISTRY_ADDRESS is not set. Deploy contracts/registry.py first, then set REGISTRY_ADDRESS.');
+    }
+  });
+}
 
 module.exports = app;
