@@ -89,41 +89,66 @@ async function initHomePage() {
       activeStatus = t.dataset.status;
       loadDeals();
     }));
+    window.addEventListener('walletchange', () => {
+      if (activeStatus === 'mine') loadDeals();
+    });
   }
   await loadDeals();
 }
 
 async function loadDeals() {
   const el = document.getElementById('sectionDeals');
+
+  if (activeStatus === 'mine' && !core.isConnected()) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-state__title">Connect your wallet</div><p>Connect your wallet to see the deals you're a buyer or freelancer on.</p></div>`;
+    return;
+  }
+
   el.innerHTML = '<p class="form-hint">Loading deals…</p>';
   try {
-    const fnName = activeStatus === 'all' ? 'get_deals' : 'get_deals_by_status';
-    const args = activeStatus === 'all' ? [50] : [activeStatus, 50];
+    let fnName, args;
+    if (activeStatus === 'mine') {
+      fnName = 'get_deals_for_address';
+      args = [core.getAddress(), 50];
+    } else if (activeStatus === 'all') {
+      fnName = 'get_deals';
+      args = [50];
+    } else {
+      fnName = 'get_deals_by_status';
+      args = [activeStatus, 50];
+    }
     const raw = await core.readRegistry(fnName, args);
     const deals = JSON.parse(raw);
-    renderDeals(deals);
+    renderDeals(deals, { showRole: activeStatus === 'mine' });
     updateStats(deals);
   } catch (e) {
     el.innerHTML = `<div class="empty-state"><div class="empty-state__title">Could not load deals</div><p>${escapeHtml(e.message || String(e))}</p></div>`;
   }
 }
 
-function renderDeals(deals) {
+function renderDeals(deals, { showRole = false } = {}) {
   const el = document.getElementById('sectionDeals');
   if (!deals.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-state__title">No deals yet</div><p>Propose the first one from New Deal.</p></div>`;
+    const message = showRole
+      ? `You're not a buyer or freelancer on any deal yet.`
+      : `Propose the first one from New Deal.`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-state__title">No deals yet</div><p>${message}</p></div>`;
     return;
   }
-  el.innerHTML = deals.map((d) => `
+  const myAddress = showRole ? core.getAddress().toLowerCase() : '';
+  el.innerHTML = deals.map((d) => {
+    const role = showRole ? (d.buyer.toLowerCase() === myAddress ? 'Buyer' : 'Freelancer') : '';
+    return `
     <a class="card" href="/deal?address=${encodeURIComponent(d.contract)}">
       <span class="${badgeClass(d.status)}">${d.status}</span>
       <p class="card__title">${escapeHtml(d.title)}</p>
       <div class="card__meta">
         <span>${core.toGenDisplay(d.total_amount)} GEN</span>
-        <span>${core.maskAddress(d.freelancer)}</span>
+        <span>${showRole ? role + ' · ' : ''}${core.maskAddress(d.freelancer)}</span>
       </div>
     </a>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function updateStats(deals) {
