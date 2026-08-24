@@ -47,32 +47,113 @@ async function getReadOnlyClient() {
   return readOnlyClient;
 }
 
-function waitForEthereumProvider(timeoutMs = 3000) {
-  return new Promise((resolve) => {
-    if (window.ethereum) return resolve(window.ethereum);
-    const start = Date.now();
-    const interval = setInterval(() => {
-      if (window.ethereum) {
-        clearInterval(interval);
-        resolve(window.ethereum);
-      } else if (Date.now() - start > timeoutMs) {
-        clearInterval(interval);
-        resolve(null);
-      }
-    }, 100);
-    window.addEventListener('ethereum#initialized', () => {
-      clearInterval(interval);
-      resolve(window.ethereum);
-    }, { once: true });
+// --- Multi-wallet discovery (EIP-6963) -------------------------------
+// Modern EVM wallets (MetaMask, Trust Wallet, Coinbase Wallet, Rabby,
+// OKX, Brave, Rainbow, etc.) each announce themselves via the
+// 'eip6963:announceProvider' event so that multiple extensions can
+// coexist without fighting over window.ethereum. We listen for those
+// announcements and let the user pick which wallet to use.
+const discoveredWallets = new Map(); // uuid -> { info, provider }
+
+function listenForWallets() {
+  window.addEventListener('eip6963:announceProvider', (event) => {
+    const { info, provider } = event.detail || {};
+    if (info && provider) discoveredWallets.set(info.uuid, { info, provider });
   });
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+}
+listenForWallets();
+
+function getLegacyProviderList() {
+  // Some wallets (older Coinbase Wallet extension, some multi-wallet
+  // setups) expose several providers via window.ethereum.providers
+  // instead of using EIP-6963.
+  if (window.ethereum && Array.isArray(window.ethereum.providers) && window.ethereum.providers.length) {
+    return window.ethereum.providers;
+  }
+  return window.ethereum ? [window.ethereum] : [];
+}
+
+function walletLabel(p, fallback) {
+  if (p.isMetaMask) return 'MetaMask';
+  if (p.isCoinbaseWallet) return 'Coinbase Wallet';
+  if (p.isTrust || p.isTrustWallet) return 'Trust Wallet';
+  if (p.isRabby) return 'Rabby';
+  if (p.isOkxWallet || p.isOKExWallet) return 'OKX Wallet';
+  if (p.isBraveWallet) return 'Brave Wallet';
+  if (p.isRainbow) return 'Rainbow';
+  if (p.isFrame) return 'Frame';
+  return fallback || 'Browser Wallet';
+}
+
+function showWalletPicker(options) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#161616;border:1px solid #333;border-radius:12px;padding:20px;max-width:360px;width:100%;';
+    const title = document.createElement('p');
+    title.textContent = 'Choose a wallet';
+    title.style.cssText = 'margin:0 0 14px;font-weight:600;';
+    box.appendChild(title);
+    options.forEach((opt) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn--ghost';
+      btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin-bottom:10px;text-align:left;';
+      if (opt.icon) {
+        const img = document.createElement('img');
+        img.src = opt.icon; img.alt = ''; img.style.cssText = 'width:22px;height:22px;border-radius:5px;';
+        btn.appendChild(img);
+      }
+      const span = document.createElement('span');
+      span.textContent = opt.label;
+      btn.appendChild(span);
+      btn.addEventListener('click', () => { cleanup(); resolve(opt.provider); });
+      box.appendChild(btn);
+    });
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn--ghost';
+    cancelBtn.style.cssText = 'width:100%;margin-top:4px;';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => { cleanup(); resolve(null); });
+    box.appendChild(cancelBtn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function cleanup() { overlay.remove(); }
+  });
+}
+
+async function waitForEthereumProvider(timeoutMs = 1500) {
+  // Give EIP-6963 announcements a brief moment to arrive.
+  const start = Date.now();
+  while (discoveredWallets.size === 0 && getLegacyProviderList().length === 0 && Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const candidates = [];
+  discoveredWallets.forEach(({ info, provider }) => {
+    candidates.push({ provider, label: info.name || walletLabel(provider), icon: info.icon });
+  });
+  // Merge in any legacy-style providers not already covered by EIP-6963.
+  getLegacyProviderList().forEach((p) => {
+    const already = candidates.some((c) => c.provider === p);
+    if (!already) candidates.push({ provider: p, label: walletLabel(p) });
+  });
+
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0].provider;
+  return showWalletPicker(candidates);
 }
 
 async function connectWalletAndEnsureNetwork() {
   const { networkConfig: net } = await fetchConfig();
   const provider = await waitForEthereumProvider();
   if (!provider) {
-    throw new Error('No wallet found. Open this site from inside your wallet app’s built-in browser, or install a browser wallet extension.');
+    throw new Error('No wallet found. Open this site from inside your wallet app’s built-in browser, or install a browser wallet extension (MetaMask, Trust Wallet, Coinbase Wallet, Rabby, OKX, etc.).');
   }
+  // Point window.ethereum at the chosen wallet so downstream libraries
+  // (which read window.ethereum directly for signing) use the same one.
+  try { window.ethereum = provider; } catch (e) { /* some wallets freeze this; ignore */ }
   try {
     await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: net.chainIdHex }] });
   } catch (e) {
