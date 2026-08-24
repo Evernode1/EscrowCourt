@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EscrowCourt — Deal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header__row">
+      <a href="/" class="brand"><span class="brand__mark">EC</span><span class="brand__word">EscrowCourt</span></a>
+      <nav class="nav">
+        <a href="/" class="nav__link">Deals</a>
+        <a href="/create" class="nav__link">New Deal</a>
+        <a href="/faq" class="nav__link">How It Works</a>
+      </nav>
+      <span id="addr" class="visually-hidden"></span>
+      <button id="connectBtn" class="btn btn--brass">Connect Wallet</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container" style="padding-top: 32px;">
+      <p class="hero__eyebrow">Deal <span id="dealId">—</span></p>
+      <div class="hero__title" id="dealTitle" style="font-size: 26px; margin-bottom: 8px;">Loading…</div>
+      <div id="dealMeta" class="form-hint" style="margin-bottom: 24px;"></div>
+
+      <section id="sectionFund" class="panel lockable is-locked" style="display:none; margin-bottom: 20px;">
+        <p style="margin: 0 0 12px;">This deal has not been funded yet.</p>
+        <button id="btnFund" class="btn btn--brass">Fund Escrow (Buyer Only)</button>
+      </section>
+
+      <section id="sectionMilestones" class="lockable is-locked"></section>
+
+      <p id="statusMsg" class="form-hint" style="margin: 16px 0;"></p>
+
+      <section class="panel">
+        <div class="form-label" style="margin-bottom:10px;">Contract Address</div>
+        <div class="form-hint" style="font-family: var(--mono); color: var(--brass);" id="contractAddr">—</div>
+      </section>
+    </div>
+  </main>
+
+  <div id="submitModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:440px; width:100%;">
+      <p class="form-label" style="margin-bottom:12px;">Submit deliverable</p>
+      <label class="form-label" for="submitModalUrl" style="font-size:11px;">Deliverable URL (optional but recommended)</label>
+      <input id="submitModalUrl" class="form-input" type="text" placeholder="https://..." />
+      <p class="form-hint" style="margin-top:6px;">If given, the AI reviewer fetches this page's live content directly — it doesn't just trust your description.</p>
+      <label class="form-label" for="submitModalDesc" style="font-size:11px; margin-top:14px;">Description</label>
+      <textarea id="submitModalDesc" class="form-textarea" placeholder="Describe what you delivered"></textarea>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button id="submitModalCancel" class="btn btn--ghost" style="flex:1;">Cancel</button>
+        <button id="submitModalConfirm" class="btn btn--brass" style="flex:1;">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="textModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:420px; width:100%;">
+      <p id="textModalLabel" class="form-label" style="margin-bottom:12px;">Enter details</p>
+      <textarea id="textModalInput" class="form-textarea"></textarea>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button id="textModalCancel" class="btn btn--ghost" style="flex:1;">Cancel</button>
+        <button id="textModalConfirm" class="btn btn--brass" style="flex:1;">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container footer__row">
+      <p>© 2026 EscrowCourt. Built on GenLayer.</p>
+      <p>Each milestone is reviewed and, if disputed, arbitrated independently.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

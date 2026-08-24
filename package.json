@@ -1,0 +1,17 @@
+{
+  "name": "escrowcourt",
+  "version": "1.0.0",
+  "description": "EscrowCourt — AI-arbitrated milestone escrow built on GenLayer.",
+  "main": "src/start.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/start.js",
+    "dev": "node src/start.js"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "morgan": "^1.10.0",
+    "cors": "^2.8.5"
+  }
+}

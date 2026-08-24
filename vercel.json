@@ -1,0 +1,14 @@
+{
+    "version": 2,
+    "builds": [
+      { "src": "src/start.js", "use": "@vercel/node" }
+    ],
+    "routes": [
+      { "src": "/(.*)", "dest": "src/start.js" }
+    ],
+    "functions": {
+      "src/start.js": {
+        "maxDuration": 60
+      }
+    }
+}

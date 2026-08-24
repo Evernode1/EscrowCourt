@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EscrowCourt — New Deal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header__row">
+      <a href="/" class="brand"><span class="brand__mark">EC</span><span class="brand__word">EscrowCourt</span></a>
+      <nav class="nav">
+        <a href="/" class="nav__link">Deals</a>
+        <a href="/create" class="nav__link is-active">New Deal</a>
+        <a href="/faq" class="nav__link">How It Works</a>
+      </nav>
+      <span id="addr" class="visually-hidden"></span>
+      <button id="connectBtn" class="btn btn--brass">Connect Wallet</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <section class="hero" style="padding-bottom: 8px;">
+        <p class="hero__eyebrow">New Escrow</p>
+        <h1 class="hero__title">Propose a deal</h1>
+        <p class="hero__sub">Set up the freelancer's address and break the work into milestones. You'll fund the full amount from your own wallet right after this contract deploys.</p>
+      </section>
+
+      <section id="sectionForm" class="lockable is-locked">
+        <div class="panel">
+          <div class="form-note">
+            Deploying this deal costs a small network fee, paid from your own wallet — there's no separate backend involved. You'll be prompted to fund the escrow immediately after deployment.
+          </div>
+          <form id="dealForm">
+            <div class="form-field">
+              <label class="form-label" for="d-title">Deal title</label>
+              <input id="d-title" class="form-input" type="text" placeholder="e.g. Landing page redesign" required />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="d-freelancer">Freelancer's wallet address</label>
+              <input id="d-freelancer" class="form-input" type="text" placeholder="0x..." required />
+            </div>
+            <div class="form-field">
+              <label class="form-label">Milestones</label>
+              <div id="milestoneRows"></div>
+              <button type="button" id="addMilestoneBtn" class="btn btn--ghost btn--sm" style="margin-top: 6px;">+ Add milestone</button>
+              <p class="form-hint">Each milestone needs a clear, checkable requirement and a GEN amount.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="d-refund-enabled" style="width:auto;" /> Allow a timeout refund
+              </label>
+              <p class="form-hint">If the freelancer never submits anything, you can reclaim a milestone's funds yourself after a delay — no AI verdict needed.</p>
+              <input id="d-refund-delay" class="form-input" type="number" min="1" placeholder="Refund delay in hours, e.g. 168 for 7 days" style="margin-top:8px; display:none;" />
+            </div>
+            <button id="submitBtn" type="submit" class="btn btn--brass btn--block" style="margin-top: 12px;">Deploy Deal Contract</button>
+          </form>
+          <p id="statusMsg" class="form-hint" style="margin-top:16px;"></p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__row">
+      <p>© 2026 EscrowCourt. Built on GenLayer.</p>
+      <p>You deploy and fund this deal yourself — nothing happens on a server.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EscrowCourt — AI-Arbitrated Milestone Escrow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header__row">
+      <a href="/" class="brand"><span class="brand__mark">EC</span><span class="brand__word">EscrowCourt</span></a>
+      <nav class="nav">
+        <a href="/" class="nav__link is-active">Deals</a>
+        <a href="/create" class="nav__link">New Deal</a>
+        <a href="/faq" class="nav__link">How It Works</a>
+      </nav>
+      <span id="addr" class="visually-hidden"></span>
+      <button id="connectBtn" class="btn btn--brass">Connect Wallet</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <section class="hero">
+        <p class="hero__eyebrow">Milestone escrow, arbitrated by AI</p>
+        <h1 class="hero__title">Freelance work, held in <em>escrow</em>, judged fairly.</h1>
+        <p class="hero__sub">A buyer funds milestones up front. A freelancer delivers and submits proof. GenLayer's AI validators independently review each deliverable against the agreed requirement — and if either side disagrees, a formal dispute gets one final, binding AI ruling.</p>
+        <div class="hero__stats">
+          <div><span id="statActive" class="stat__value">—</span><span class="stat__label">Active Deals</span></div>
+          <div><span id="statTotal" class="stat__value">—</span><span class="stat__label">Total GEN Escrowed</span></div>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Filters">
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" data-status="all">All</button>
+          <button class="tab" data-status="active">Active</button>
+          <button class="tab" data-status="completed">Completed</button>
+        </div>
+      </section>
+
+      <section id="sectionDeals" class="cards"></section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__row">
+      <p>© 2026 EscrowCourt. Built on GenLayer.</p>
+      <p>Every deal is its own contract. No server-side wallet, ever.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
