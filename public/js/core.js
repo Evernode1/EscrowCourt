@@ -201,6 +201,7 @@ async function disconnect() {
   localStorage.removeItem('connectedAddress');
   client = null;
   setUIDisconnected();
+  window.dispatchEvent(new CustomEvent('walletchange', { detail: { address: null } }));
 }
 
 async function connect() {
@@ -208,6 +209,7 @@ async function connect() {
   localStorage.setItem('connectedAddress', address);
   updateAccount(address);
   setUIConnected(address);
+  window.dispatchEvent(new CustomEvent('walletchange', { detail: { address } }));
   return address;
 }
 
