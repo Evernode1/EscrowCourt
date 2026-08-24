@@ -106,7 +106,7 @@ class Registry(gl.Contract):
             contract=deal_contract,
             title=title,
             total_amount=u256(total_amount),
-            created_at=str(created_at / 1000),
+            created_at=str(created_at),
             status="active",
         )
         self.deals[deal_contract] = entry
@@ -122,6 +122,21 @@ class Registry(gl.Contract):
         if entry is None:
             raise Exception("Unknown deal contract")
         entry.status = status
+
+        # deals_by_party holds separate copies of the same entry (one under
+        # the buyer's map, one under the freelancer's), so they must be
+        # updated explicitly or they'd stay stuck at their original status.
+        buyer_deals = self.deals_by_party.get(entry.buyer, None)
+        if buyer_deals is not None:
+            buyer_entry = buyer_deals.get(deal_contract, None)
+            if buyer_entry is not None:
+                buyer_entry.status = status
+
+        freelancer_deals = self.deals_by_party.get(entry.freelancer, None)
+        if freelancer_deals is not None:
+            freelancer_entry = freelancer_deals.get(deal_contract, None)
+            if freelancer_entry is not None:
+                freelancer_entry.status = status
 
     @gl.public.view
     def get_deals(self, limit: int) -> str:
