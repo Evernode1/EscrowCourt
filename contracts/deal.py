@@ -17,6 +17,12 @@ class Deal(gl.Contract):
     refund_enabled: bool
     refund_delay_seconds: u256
 
+    # Both windows are contract-enforced, buyer/freelancer-agreed durations
+    # (set once at deal creation, like refund_delay_seconds) rather than a
+    # value any single party can supply at call time.
+    dispute_evidence_window_seconds: u256
+    approval_challenge_window_seconds: u256
+
     milestone_descriptions: DynArray[str]
     milestone_amounts: DynArray[u256]
     milestone_status: DynArray[str]
@@ -28,6 +34,8 @@ class Deal(gl.Contract):
     milestone_freelancer_evidence: DynArray[str]
     milestone_buyer_cancel_vote: DynArray[bool]
     milestone_freelancer_cancel_vote: DynArray[bool]
+    milestone_rejected_at: DynArray[str]
+    milestone_approved_at: DynArray[str]
 
     def __init__(
         self,
@@ -40,11 +48,17 @@ class Deal(gl.Contract):
         created_at_value: int,
         refund_enabled_value: bool,
         refund_delay_seconds_value: int,
+        dispute_evidence_window_seconds_value: int,
+        approval_challenge_window_seconds_value: int,
     ):
         if len(milestone_descriptions_value) == 0:
             raise Exception("A deal must have at least one milestone")
         if len(milestone_descriptions_value) != len(milestone_amounts_value):
             raise Exception("Milestone descriptions and amounts must match in length")
+        if dispute_evidence_window_seconds_value <= 0:
+            raise Exception("dispute_evidence_window_seconds must be a positive number of seconds")
+        if approval_challenge_window_seconds_value <= 0:
+            raise Exception("approval_challenge_window_seconds must be a positive number of seconds")
 
         self.registry = Address(registry_value)
         self.buyer = Address(buyer_value)
@@ -55,6 +69,8 @@ class Deal(gl.Contract):
         self.fee_bps_at_funding = u256(0)
         self.refund_enabled = refund_enabled_value
         self.refund_delay_seconds = u256(max(0, refund_delay_seconds_value))
+        self.dispute_evidence_window_seconds = u256(dispute_evidence_window_seconds_value)
+        self.approval_challenge_window_seconds = u256(approval_challenge_window_seconds_value)
 
         for i in range(len(milestone_descriptions_value)):
             self.milestone_descriptions.append(milestone_descriptions_value[i])
@@ -68,12 +84,21 @@ class Deal(gl.Contract):
             self.milestone_freelancer_evidence.append("")
             self.milestone_buyer_cancel_vote.append(False)
             self.milestone_freelancer_cancel_vote.append(False)
+            self.milestone_rejected_at.append("")
+            self.milestone_approved_at.append("")
 
     def _total_amount(self) -> u256:
         total = u256(0)
         for amount in self.milestone_amounts:
             total = u256(total + amount)
         return total
+
+    def _now_ms(self) -> int:
+        # Contract-verifiable clock: in deterministic execution this resolves
+        # to the transaction's own timestamp (agreed upon by consensus), so
+        # no caller — buyer or freelancer — can supply an arbitrary value to
+        # fast-forward or rewind any of the windows below.
+        return int(gl.vm.get_timestamp().timestamp() * 1000)
 
     @gl.public.write.payable
     def fund_escrow(self):
@@ -117,6 +142,12 @@ class Deal(gl.Contract):
         self.milestone_status[index] = "submitted"
         self.milestone_buyer_cancel_vote[index] = False
         self.milestone_freelancer_cancel_vote[index] = False
+        # A fresh submission starts a fresh review cycle — clear out any
+        # evidence/timestamps left over from a prior rejection.
+        self.milestone_buyer_evidence[index] = ""
+        self.milestone_freelancer_evidence[index] = ""
+        self.milestone_rejected_at[index] = ""
+        self.milestone_approved_at[index] = ""
 
     @gl.public.write
     def review_milestone(self, index: int):
@@ -184,6 +215,14 @@ Your output must be perfectly parsable by a JSON parser without errors.
         self.milestone_reasoning[index] = result["reasoning"]
         self.milestone_last_raw_response[index] = str(result.get("_raw", ""))[:2000]
 
+        now = str(self._now_ms())
+        if result["verdict"] == "rejected":
+            self.milestone_rejected_at[index] = now
+            self.milestone_approved_at[index] = ""
+        else:
+            self.milestone_approved_at[index] = now
+            self.milestone_rejected_at[index] = ""
+
     @gl.public.write
     def submit_dispute_evidence(self, index: int, evidence: str):
         self._check_index(index)
@@ -202,13 +241,37 @@ Your output must be perfectly parsable by a JSON parser without errors.
         self._check_index(index)
         if self.milestone_status[index] != "rejected":
             raise Exception("Only a rejected milestone can be escalated to a binding dispute")
+
+        # Fair evidence window: both sides need a real chance to call
+        # submit_dispute_evidence before the binding verdict is locked in.
+        rejected_at = self.milestone_rejected_at[index]
+        if rejected_at:
+            elapsed_seconds = (self._now_ms() - int(rejected_at)) / 1000
+            remaining = int(self.dispute_evidence_window_seconds) - int(elapsed_seconds)
+            if remaining > 0:
+                raise Exception(f"Evidence window is still open — wait {remaining} more second(s) before resolving")
+
         buyer_evidence = self.milestone_buyer_evidence[index] or "(the buyer did not submit evidence)"
         freelancer_evidence = self.milestone_freelancer_evidence[index] or "(the freelancer did not submit evidence)"
         description = self.milestone_descriptions[index]
         deliverable = self.milestone_deliverable_description[index]
+        url = self.milestone_deliverable_url[index]
         prior_reasoning = self.milestone_reasoning[index]
 
         def leader_fn():
+            # Re-fetch (rather than trust) the deliverable: the earlier
+            # rejection's page snapshot is stale by the time a binding
+            # dispute is decided, and either party's "evidence" text is
+            # unauthenticated self-reporting, not proof.
+            page_content = ""
+            fetch_note = "No deliverable URL was submitted — judge from the description and evidence alone."
+            if url:
+                try:
+                    page_content = gl.nondet.web.render(url, mode="text")
+                    fetch_note = "The live page content below was re-fetched directly from the submitted URL at dispute time — judge the ACTUAL current content, not just either party's description of it."
+                except Exception as fetch_error:
+                    fetch_note = f"The submitted URL could not be fetched ({fetch_error}). Judge from the description and evidence alone, and note the unverifiable link in your reasoning."
+
             prompt = f"""You are an impartial arbitrator making a FINAL, BINDING decision in an escrow dispute. Multiple independent validators will review this same dispute and must reach consensus.
 
 MILESTONE REQUIREMENT:
@@ -216,6 +279,12 @@ MILESTONE REQUIREMENT:
 
 FREELANCER'S DELIVERABLE DESCRIPTION:
 \"\"\"{deliverable}\"\"\"
+
+DELIVERABLE URL: {url or "(none provided)"}
+{fetch_note}
+
+LIVE FETCHED PAGE CONTENT AT DISPUTE TIME (if available):
+\"\"\"{page_content[:4000] if page_content else "(not available)"}\"\"\"
 
 AN EARLIER AUTOMATED REVIEW REJECTED THIS DELIVERABLE, REASONING:
 \"\"\"{prior_reasoning}\"\"\"
@@ -226,7 +295,7 @@ BUYER'S DISPUTE EVIDENCE / STATEMENT:
 FREELANCER'S DISPUTE EVIDENCE / STATEMENT:
 \"\"\"{freelancer_evidence}\"\"\"
 
-Weigh both sides' evidence fairly and independently of the earlier automated rejection — you may overturn it if the evidence justifies that. This decision is final: the milestone payment will be released to the freelancer if you rule "approved", or refunded to the buyer if you rule "refunded".
+Weigh both sides' evidence fairly and independently of the earlier automated rejection — you may overturn it if the live fetched content and evidence justify that. This decision is final: the milestone payment will be released to the freelancer if you rule "approved", or refunded to the buyer if you rule "refunded".
 
 Respond ONLY with a JSON object in this exact format:
 {{
@@ -243,6 +312,7 @@ Your output must be perfectly parsable by a JSON parser without errors.
             if parsed["verdict"] not in ("approved", "refunded"):
                 parsed["verdict"] = "refunded"
             parsed["reasoning"] = str(parsed["reasoning"])
+            parsed["_raw"] = raw
             return parsed
 
         def validator_fn(leader_result: gl.vm.Result) -> bool:
@@ -255,7 +325,35 @@ Your output must be perfectly parsable by a JSON parser without errors.
         result = gl.vm.run_nondet(leader_fn, validator_fn)
         self.milestone_status[index] = result["verdict"]
         self.milestone_reasoning[index] = result["reasoning"]
+        self.milestone_last_raw_response[index] = str(result.get("_raw", ""))[:2000]
+        if result["verdict"] == "approved":
+            self.milestone_approved_at[index] = str(self._now_ms())
         self._maybe_close_deal()
+
+    @gl.public.write
+    def challenge_approved_milestone(self, index: int):
+        """
+        While an approved milestone's challenge window is still open, the
+        buyer can force it back into the dispute path instead of it quietly
+        becoming claimable. This reuses the existing evidence + binding
+        resolve_dispute flow rather than a separate, unappealable auto-payout.
+        """
+        self._check_index(index)
+        if self.milestone_status[index] != "approved":
+            raise Exception("Only an approved milestone can be challenged")
+        if gl.message.sender_address.as_hex.lower() != self.buyer.as_hex.lower():
+            raise Exception("Only the buyer can challenge an approved milestone")
+
+        approved_at = self.milestone_approved_at[index]
+        if approved_at:
+            elapsed_seconds = (self._now_ms() - int(approved_at)) / 1000
+            if elapsed_seconds >= int(self.approval_challenge_window_seconds):
+                raise Exception("The challenge window has already elapsed")
+
+        self.milestone_status[index] = "rejected"
+        self.milestone_rejected_at[index] = str(self._now_ms())
+        self.milestone_approved_at[index] = ""
+        self.milestone_reasoning[index] = "Approval challenged by the buyer within the challenge window; escalated back to dispute."
 
     @gl.public.write
     def propose_cancel(self, index: int):
@@ -285,12 +383,13 @@ Your output must be perfectly parsable by a JSON parser without errors.
             self._maybe_close_deal()
 
     @gl.public.write
-    def claim_timeout_refund(self, index: int, checked_at: int):
+    def claim_timeout_refund(self, index: int):
         """
         If the deal was created with a refund window and the freelancer
         never submitted anything before it elapsed, the buyer can reclaim
-        that milestone's funds unilaterally. `checked_at` is the caller's
-        current time in epoch milliseconds, matching `created_at`.
+        that milestone's funds unilaterally. Elapsed time is measured
+        against the contract-verifiable transaction clock (see `_now_ms`),
+        not a value supplied by the caller.
         """
         self._check_index(index)
         if not self.refund_enabled:
@@ -299,7 +398,7 @@ Your output must be perfectly parsable by a JSON parser without errors.
             raise Exception("Only the buyer can claim a timeout refund")
         if self.milestone_status[index] != "pending":
             raise Exception("Timeout refund only applies before the freelancer has submitted anything")
-        elapsed_seconds = (checked_at - int(self.created_at)) / 1000
+        elapsed_seconds = (self._now_ms() - int(self.created_at)) / 1000
         if elapsed_seconds < int(self.refund_delay_seconds):
             raise Exception("The refund delay has not elapsed yet")
         amount = self.milestone_amounts[index]
@@ -315,6 +414,17 @@ Your output must be perfectly parsable by a JSON parser without errors.
             raise Exception("Only the freelancer can claim a milestone payment")
         if self.milestone_status[index] != "approved":
             raise Exception("Milestone is not in an approved, claimable state")
+
+        # Buyer challenge window: an approval doesn't become claimable the
+        # instant it's issued — the buyer gets a fixed window to call
+        # challenge_approved_milestone() first.
+        approved_at = self.milestone_approved_at[index]
+        if approved_at:
+            elapsed_seconds = (self._now_ms() - int(approved_at)) / 1000
+            remaining = int(self.approval_challenge_window_seconds) - int(elapsed_seconds)
+            if remaining > 0:
+                raise Exception(f"Buyer challenge window is still open — wait {remaining} more second(s) before claiming")
+
         amount = self.milestone_amounts[index]
         self.milestone_status[index] = "paid"
 
@@ -372,6 +482,8 @@ Your output must be perfectly parsable by a JSON parser without errors.
                 "freelancer_evidence": self.milestone_freelancer_evidence[i],
                 "buyer_cancel_vote": str(self.milestone_buyer_cancel_vote[i]),
                 "freelancer_cancel_vote": str(self.milestone_freelancer_cancel_vote[i]),
+                "rejected_at": self.milestone_rejected_at[i],
+                "approved_at": self.milestone_approved_at[i],
             })
         return json.dumps({
             "registry": self.registry.as_hex,
@@ -383,6 +495,8 @@ Your output must be perfectly parsable by a JSON parser without errors.
             "fee_bps_at_funding": str(self.fee_bps_at_funding),
             "refund_enabled": str(self.refund_enabled),
             "refund_delay_seconds": str(self.refund_delay_seconds),
+            "dispute_evidence_window_seconds": str(self.dispute_evidence_window_seconds),
+            "approval_challenge_window_seconds": str(self.approval_challenge_window_seconds),
             "total_amount": str(self._total_amount()),
             "milestones": milestones,
         })
