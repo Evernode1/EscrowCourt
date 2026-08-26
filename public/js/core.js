@@ -288,7 +288,7 @@ async function writeDeal(dealAddress, functionName, args = [], valueWei = '0') {
 // Deploys a brand-new Deal contract directly from the connected wallet — the
 // user pays their own gas and signs the deployment themselves. There is no
 // server-side wallet involved anywhere in this flow.
-async function deployDeal({ buyer, freelancer, title, milestoneDescriptions, milestoneAmountsWei, createdAt, refundEnabled, refundDelaySeconds }) {
+async function deployDeal({ buyer, freelancer, title, milestoneDescriptions, milestoneAmountsWei, createdAt, refundEnabled, refundDelaySeconds, disputeEvidenceWindowSeconds, approvalChallengeWindowSeconds }) {
   if (_writeInFlight) throw new Error('Another transaction is already in progress. Please wait for it to finish.');
   if (!client) throw new Error('Wallet not connected');
   const { registryAddress: registry } = await fetchConfig();
@@ -298,7 +298,7 @@ async function deployDeal({ buyer, freelancer, title, milestoneDescriptions, mil
   try {
     const hash = await client.deployContract({
       code,
-      args: [registry, buyer, freelancer, title, milestoneDescriptions, milestoneAmountsWei.map((v) => BigInt(v)), createdAt, Boolean(refundEnabled), Number(refundDelaySeconds || 0)],
+      args: [registry, buyer, freelancer, title, milestoneDescriptions, milestoneAmountsWei.map((v) => BigInt(v)), createdAt, Boolean(refundEnabled), Number(refundDelaySeconds || 0), Number(disputeEvidenceWindowSeconds), Number(approvalChallengeWindowSeconds)],
     });
     const receipt = await client.waitForTransactionReceipt({ hash, status: TransactionStatus.ACCEPTED, retries: 200, interval: 5000 });
     return receipt.data?.contract_address ?? receipt.txDataDecoded?.contractAddress;
