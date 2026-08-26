@@ -58,6 +58,16 @@
               <p class="form-hint">If the freelancer never submits anything, you can reclaim a milestone's funds yourself after a delay — no AI verdict needed.</p>
               <input id="d-refund-delay" class="form-input" type="number" min="1" placeholder="Refund delay in hours, e.g. 168 for 7 days" style="margin-top:8px; display:none;" />
             </div>
+            <div class="form-field">
+              <label class="form-label" for="d-evidence-window">Dispute evidence window (hours)</label>
+              <p class="form-hint">Once a milestone is rejected, both sides get at least this long to submit evidence before a binding dispute can be resolved.</p>
+              <input id="d-evidence-window" class="form-input" type="number" min="0.01" step="0.01" value="24" required />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="d-challenge-window">Buyer challenge window (hours)</label>
+              <p class="form-hint">After a milestone is approved, the buyer gets at least this long to challenge it before the freelancer can claim payment.</p>
+              <input id="d-challenge-window" class="form-input" type="number" min="0.01" step="0.01" value="24" required />
+            </div>
             <button id="submitBtn" type="submit" class="btn btn--brass btn--block" style="margin-top: 12px;">Deploy Deal Contract</button>
           </form>
           <p id="statusMsg" class="form-hint" style="margin-top:16px;"></p>
