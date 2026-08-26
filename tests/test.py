@@ -29,6 +29,12 @@ MILESTONE_2 = "Implement the homepage in responsive HTML/CSS matching the approv
 AMOUNT_1 = "500000000000000000"   # 0.5 GEN
 AMOUNT_2 = "1000000000000000000"  # 1.0 GEN
 
+# Small-but-real windows so tests can cross them with an actual time.sleep()
+# instead of a spoofable caller-supplied timestamp (that spoofing is exactly
+# what these fixes remove from the contract).
+DEFAULT_EVIDENCE_WINDOW = 3
+DEFAULT_CHALLENGE_WINDOW = 3
+
 
 @pytest.fixture(scope="module")
 def buyer():
@@ -59,7 +65,9 @@ def deploy_registry(account):
 
 
 def deploy_deal(account, registry_address, freelancer_address, title, descriptions, amounts,
-                refund_enabled=False, refund_delay_seconds=0, created_at=None):
+                refund_enabled=False, refund_delay_seconds=0, created_at=None,
+                dispute_evidence_window_seconds=DEFAULT_EVIDENCE_WINDOW,
+                approval_challenge_window_seconds=DEFAULT_CHALLENGE_WINDOW):
     code = open(DEAL_PATH, "r").read()
     args = json.dumps({
         "registry_value": registry_address,
@@ -71,6 +79,8 @@ def deploy_deal(account, registry_address, freelancer_address, title, descriptio
         "created_at_value": created_at if created_at is not None else int(time.time() * 1000),
         "refund_enabled_value": refund_enabled,
         "refund_delay_seconds_value": refund_delay_seconds,
+        "dispute_evidence_window_seconds_value": dispute_evidence_window_seconds,
+        "approval_challenge_window_seconds_value": approval_challenge_window_seconds,
     })
     address, deploy_response = deploy_intelligent_contract(account, code, args)
     assert has_success_status(deploy_response)
@@ -78,7 +88,9 @@ def deploy_deal(account, registry_address, freelancer_address, title, descriptio
     return address
 
 
-def deploy_deal_raw(account, registry_address, freelancer_address, title, descriptions, amounts):
+def deploy_deal_raw(account, registry_address, freelancer_address, title, descriptions, amounts,
+                     dispute_evidence_window_seconds=DEFAULT_EVIDENCE_WINDOW,
+                     approval_challenge_window_seconds=DEFAULT_CHALLENGE_WINDOW):
     """Like deploy_deal, but returns the raw (address, deploy_response) pair
     instead of asserting success — for tests that expect deployment to fail."""
     code = open(DEAL_PATH, "r").read()
@@ -92,6 +104,8 @@ def deploy_deal_raw(account, registry_address, freelancer_address, title, descri
         "created_at_value": int(time.time() * 1000),
         "refund_enabled_value": False,
         "refund_delay_seconds_value": 0,
+        "dispute_evidence_window_seconds_value": dispute_evidence_window_seconds,
+        "approval_challenge_window_seconds_value": approval_challenge_window_seconds,
     })
     return deploy_intelligent_contract(account, code, args)
 
@@ -128,6 +142,22 @@ def test_deploy_rejects_mismatched_descriptions_and_amounts(registry_address, bu
     _, deploy_response = deploy_deal_raw(
         buyer, registry_address, freelancer.address, "Mismatched",
         [MILESTONE_1, MILESTONE_2], [AMOUNT_1],  # 2 descriptions, 1 amount
+    )
+    assert not has_success_status(deploy_response)
+
+
+def test_deploy_rejects_zero_evidence_window(registry_address, buyer, freelancer):
+    _, deploy_response = deploy_deal_raw(
+        buyer, registry_address, freelancer.address, "Zero evidence window",
+        [MILESTONE_1], [AMOUNT_1], dispute_evidence_window_seconds=0,
+    )
+    assert not has_success_status(deploy_response)
+
+
+def test_deploy_rejects_zero_challenge_window(registry_address, buyer, freelancer):
+    _, deploy_response = deploy_deal_raw(
+        buyer, registry_address, freelancer.address, "Zero challenge window",
+        [MILESTONE_1], [AMOUNT_1], approval_challenge_window_seconds=0,
     )
     assert not has_success_status(deploy_response)
 
@@ -361,6 +391,10 @@ def test_full_approval_flow_and_payment(registry_address, buyer, freelancer):
     if milestone["status"] != "approved":
         pytest.skip("Model did not approve this delivery in this run; payment path not exercised")
 
+    too_early = send_transaction(freelancer, deal_address, "claim_payment", [0])
+    assert not has_success_status(too_early)  # buyer challenge window still open
+
+    time.sleep(DEFAULT_CHALLENGE_WINDOW + 1)
     payout = send_transaction(freelancer, deal_address, "claim_payment", [0])
     assert has_success_status(payout)
 
@@ -439,11 +473,15 @@ def test_full_dispute_flow(registry_address, buyer, freelancer):
     if status != "rejected":
         pytest.skip("Model did not reject this mismatched delivery in this run; dispute path not exercised")
 
+    too_early = send_transaction(buyer, deal_address, "resolve_dispute", [0])
+    assert not has_success_status(too_early)  # evidence window still open
+
     buyer_evidence = send_transaction(buyer, deal_address, "submit_dispute_evidence", [0, "This clearly does not meet the milestone requirement."])
     assert has_success_status(buyer_evidence)
     freelancer_evidence = send_transaction(freelancer, deal_address, "submit_dispute_evidence", [0, "I believe the drawing satisfies the creative intent of the brief."])
     assert has_success_status(freelancer_evidence)
 
+    time.sleep(DEFAULT_EVIDENCE_WINDOW + 1)
     resolution = send_transaction(buyer, deal_address, "resolve_dispute", [0])
     assert has_success_status(resolution)
 
@@ -461,8 +499,66 @@ def test_full_dispute_flow(registry_address, buyer, freelancer):
         second_refund = send_transaction(buyer, deal_address, "claim_refund", [0])
         assert not has_success_status(second_refund)
     else:
+        time.sleep(DEFAULT_CHALLENGE_WINDOW + 1)
         payout = send_transaction(freelancer, deal_address, "claim_payment", [0])
         assert has_success_status(payout)
+
+
+def test_challenge_approved_milestone_reopens_dispute(registry_address, buyer, freelancer):
+    """
+    Within the challenge window, the buyer can send an "approved" milestone
+    back into the dispute path instead of letting it silently become
+    claimable, and get_last_raw_response should reflect the re-fetched
+    binding review once resolved.
+    """
+    deal_address = deploy_deal(
+        buyer, registry_address, freelancer.address, "Challenge test", [MILESTONE_1], [AMOUNT_1],
+    )
+    send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
+    send_transaction(freelancer, deal_address, "submit_milestone", [0, "", "Delivered a Figma wireframe covering hero, features, and footer sections as requested."])
+    send_transaction(freelancer, deal_address, "review_milestone", [0])
+
+    details = get_details(deal_address, buyer)
+    if details["milestones"][0]["status"] != "approved":
+        pytest.skip("Model did not approve this delivery in this run; challenge path not exercised")
+
+    only_buyer = send_transaction(freelancer, deal_address, "challenge_approved_milestone", [0])
+    assert not has_success_status(only_buyer)
+
+    challenge = send_transaction(buyer, deal_address, "challenge_approved_milestone", [0])
+    assert has_success_status(challenge)
+
+    details = get_details(deal_address, buyer)
+    assert details["milestones"][0]["status"] == "rejected"
+
+    # Payment can no longer be claimed off the old approval.
+    blocked_payment = send_transaction(freelancer, deal_address, "claim_payment", [0])
+    assert not has_success_status(blocked_payment)
+
+
+def test_cannot_challenge_after_window_elapses(registry_address, buyer, freelancer):
+    deal_address = deploy_deal(
+        buyer, registry_address, freelancer.address, "Late challenge", [MILESTONE_1], [AMOUNT_1],
+        approval_challenge_window_seconds=2,
+    )
+    send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
+    send_transaction(freelancer, deal_address, "submit_milestone", [0, "", "Delivered a Figma wireframe covering hero, features, and footer sections as requested."])
+    send_transaction(freelancer, deal_address, "review_milestone", [0])
+
+    details = get_details(deal_address, buyer)
+    if details["milestones"][0]["status"] != "approved":
+        pytest.skip("Model did not approve this delivery in this run; challenge path not exercised")
+
+    time.sleep(3)
+    late_challenge = send_transaction(buyer, deal_address, "challenge_approved_milestone", [0])
+    assert not has_success_status(late_challenge)
+
+
+def test_challenge_requires_approved_status(registry_address, buyer, freelancer):
+    deal_address = deploy_deal(buyer, registry_address, freelancer.address, "Nothing to challenge", [MILESTONE_1], [AMOUNT_1])
+    send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
+    response = send_transaction(buyer, deal_address, "challenge_approved_milestone", [0])
+    assert not has_success_status(response)
 
 
 # ---------------------------------------------------------------------------
@@ -502,33 +598,37 @@ def test_deal_marked_completed_in_registry_after_resolution(registry_address, bu
 def test_timeout_refund_requires_refund_enabled(registry_address, buyer, freelancer):
     deal_address = deploy_deal(buyer, registry_address, freelancer.address, "No refund window", [MILESTONE_1], [AMOUNT_1])
     send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
-    response = send_transaction(buyer, deal_address, "claim_timeout_refund", [0, int(time.time() * 1000)])
+    response = send_transaction(buyer, deal_address, "claim_timeout_refund", [0])
     assert not has_success_status(response)
 
 
 def test_only_buyer_can_claim_timeout_refund(registry_address, buyer, freelancer):
-    now_ms = int(time.time() * 1000)
     deal_address = deploy_deal(
         buyer, registry_address, freelancer.address, "Wrong claimer timeout", [MILESTONE_1], [AMOUNT_1],
-        refund_enabled=True, refund_delay_seconds=1, created_at=now_ms,
+        refund_enabled=True, refund_delay_seconds=1,
     )
     send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
-    response = send_transaction(freelancer, deal_address, "claim_timeout_refund", [0, now_ms + 5_000])
+    response = send_transaction(freelancer, deal_address, "claim_timeout_refund", [0])
     assert not has_success_status(response)
 
 
 def test_timeout_refund_respects_delay(registry_address, buyer, freelancer):
-    now_ms = int(time.time() * 1000)
+    """
+    The delay is measured against the contract's own transaction clock now,
+    not a caller-supplied timestamp — so this test crosses it by actually
+    waiting, instead of asking the contract to pretend time has passed.
+    """
     deal_address = deploy_deal(
         buyer, registry_address, freelancer.address, "Timed refund test", [MILESTONE_1], [AMOUNT_1],
-        refund_enabled=True, refund_delay_seconds=3600, created_at=now_ms,  # 1 hour
+        refund_enabled=True, refund_delay_seconds=3,
     )
     send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
 
-    too_early = send_transaction(buyer, deal_address, "claim_timeout_refund", [0, now_ms + 60_000])  # only 1 minute later
+    too_early = send_transaction(buyer, deal_address, "claim_timeout_refund", [0])
     assert not has_success_status(too_early)
 
-    after_delay = send_transaction(buyer, deal_address, "claim_timeout_refund", [0, now_ms + 3_700_000])  # past the hour
+    time.sleep(4)
+    after_delay = send_transaction(buyer, deal_address, "claim_timeout_refund", [0])
     assert has_success_status(after_delay)
 
     details = get_details(deal_address, buyer)
@@ -536,13 +636,13 @@ def test_timeout_refund_respects_delay(registry_address, buyer, freelancer):
 
 
 def test_timeout_refund_only_applies_before_submission(registry_address, buyer, freelancer):
-    now_ms = int(time.time() * 1000)
     deal_address = deploy_deal(
         buyer, registry_address, freelancer.address, "Already submitted", [MILESTONE_1], [AMOUNT_1],
-        refund_enabled=True, refund_delay_seconds=1, created_at=now_ms,
+        refund_enabled=True, refund_delay_seconds=1,
     )
     send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
     send_transaction(freelancer, deal_address, "submit_milestone", [0, "", "Work submitted before timeout."])
 
-    response = send_transaction(buyer, deal_address, "claim_timeout_refund", [0, now_ms + 5_000])
+    time.sleep(2)
+    response = send_transaction(buyer, deal_address, "claim_timeout_refund", [0])
     assert not has_success_status(response)
