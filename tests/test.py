@@ -635,6 +635,31 @@ def test_timeout_refund_respects_delay(registry_address, buyer, freelancer):
     assert details["milestones"][0]["status"] == "refund_claimed"
 
 
+def test_backdated_created_at_cannot_bypass_refund_delay(registry_address, buyer, freelancer):
+    """
+    Regression test for the steward's rejection: created_at_value is a
+    buyer-supplied constructor arg (display/registry metadata only). Setting
+    it far in the past must NOT make the timeout refund immediately
+    claimable — the delay has to be measured from the contract's own
+    deployment timestamp (`deployed_at`), which the buyer cannot set.
+    """
+    ancient_created_at = int(time.time() * 1000) - (10 * 365 * 24 * 3600 * 1000)  # ~10 years ago
+    deal_address = deploy_deal(
+        buyer, registry_address, freelancer.address, "Backdated created_at attack", [MILESTONE_1], [AMOUNT_1],
+        refund_enabled=True, refund_delay_seconds=3600, created_at=ancient_created_at,
+    )
+    send_transaction(buyer, deal_address, "fund_escrow", [], value=int(AMOUNT_1))
+
+    details = get_details(deal_address, buyer)
+    assert details["created_at"] == str(ancient_created_at)  # stored as given, but...
+    assert details["deployed_at"] != details["created_at"]   # ...not what timing is measured from
+
+    # Despite the ancient created_at, the 1-hour delay has NOT actually
+    # elapsed since real deployment, so this must still be rejected.
+    immediate_attempt = send_transaction(buyer, deal_address, "claim_timeout_refund", [0])
+    assert not has_success_status(immediate_attempt)
+
+
 def test_timeout_refund_only_applies_before_submission(registry_address, buyer, freelancer):
     deal_address = deploy_deal(
         buyer, registry_address, freelancer.address, "Already submitted", [MILESTONE_1], [AMOUNT_1],
