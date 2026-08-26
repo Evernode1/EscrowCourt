@@ -31,6 +31,14 @@ Each milestone moves through this independently of the others — one disputed m
 - **Admin controls** — the Registry has an owner who can adjust the fee, treasury address, and pause new deal funding (in-flight deals are unaffected).
 - **Debug transparency** — `get_last_raw_response` exposes the last unparsed AI output for a milestone review, for troubleshooting an unexpected verdict.
 
+## Steward-requested hardening (this revision)
+
+- **Contract-verifiable timing, not buyer-supplied** — `claim_timeout_refund` no longer accepts a caller-provided timestamp. Every window (`refund_delay_seconds`, `dispute_evidence_window_seconds`, `approval_challenge_window_seconds`) is now measured against `gl.vm.get_timestamp()` — the transaction's own deterministic clock — via a shared `_now_ms()` helper, so neither party can fast-forward or rewind elapsed time.
+- **Fair evidence window before a binding dispute** — `resolve_dispute` now reverts until `dispute_evidence_window_seconds` has elapsed since the rejection, giving both buyer and freelancer real time to call `submit_dispute_evidence` before the final AI verdict is locked in.
+- **Re-fetched, authenticated deliverable in disputes** — the `resolve_dispute` AI leader re-fetches the deliverable URL via `gl.nondet.web.render` at dispute time (same pattern as `review_milestone`) instead of trusting the stale earlier snapshot or either party's self-reported evidence text. The raw LLM response is stored via `get_last_raw_response` for auditability.
+- **Buyer challenge window on approvals** — a new `approval_challenge_window_seconds` (constructor arg, validated `> 0` at deploy time, same as the other windows) delays `claim_payment` until it elapses. Within that window the buyer can call the new `challenge_approved_milestone()` write method to send the milestone back into the evidence + `resolve_dispute` flow instead of it silently becoming claimable.
+- Frontend (create form + deal actions) and `tests/test.py` were updated to cover every new revert path (zero-window deploys, open evidence window, open challenge window, non-buyer challenge attempts) alongside the corresponding happy paths.
+
 ## Tech Stack
 
 | Layer | Technologies |
@@ -56,7 +64,7 @@ pip install -r tests/requirements.txt
 pytest tests/test.py -v -s
 ```
 
-Covers: unfunded deals, exact-amount funding validation, buyer-only funding, registry sync on funding, freelancer-only milestone submission, the full approve → claim → double-claim-rejected flow, dispute preconditions, and milestone independence within a multi-milestone deal.
+Covers: unfunded deals, exact-amount funding validation, buyer-only funding, registry sync on funding, freelancer-only milestone submission, the full approve → claim → double-claim-rejected flow, dispute preconditions, milestone independence within a multi-milestone deal, the full dispute-evidence flow, the approval challenge window (reopen + post-window rejection + non-buyer rejection), zero-second-window deploy rejection, and the timeout-refund path (gating, buyer-only, delay enforcement, pre-submission-only).
 
 ---
 
