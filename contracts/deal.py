@@ -11,6 +11,7 @@ class Deal(gl.Contract):
     freelancer: Address
     title: str
     created_at: str
+    deployed_at: str
     funded: bool
     fee_bps_at_funding: u256
 
@@ -71,6 +72,13 @@ class Deal(gl.Contract):
         self.refund_delay_seconds = u256(max(0, refund_delay_seconds_value))
         self.dispute_evidence_window_seconds = u256(dispute_evidence_window_seconds_value)
         self.approval_challenge_window_seconds = u256(approval_challenge_window_seconds_value)
+        # `created_at_value` is caller-supplied (display/registry metadata
+        # only — see get_deal_details). `deployed_at` is derived from the
+        # contract's own deterministic clock at construction time and is
+        # what every timing check below actually measures against, so a
+        # buyer can no longer backdate `created_at_value` to make a timeout
+        # refund artificially available immediately.
+        self.deployed_at = str(self._now_ms())
 
         for i in range(len(milestone_descriptions_value)):
             self.milestone_descriptions.append(milestone_descriptions_value[i])
@@ -398,7 +406,7 @@ Your output must be perfectly parsable by a JSON parser without errors.
             raise Exception("Only the buyer can claim a timeout refund")
         if self.milestone_status[index] != "pending":
             raise Exception("Timeout refund only applies before the freelancer has submitted anything")
-        elapsed_seconds = (self._now_ms() - int(self.created_at)) / 1000
+        elapsed_seconds = (self._now_ms() - int(self.deployed_at)) / 1000
         if elapsed_seconds < int(self.refund_delay_seconds):
             raise Exception("The refund delay has not elapsed yet")
         amount = self.milestone_amounts[index]
@@ -491,6 +499,7 @@ Your output must be perfectly parsable by a JSON parser without errors.
             "freelancer": self.freelancer.as_hex,
             "title": self.title,
             "created_at": self.created_at,
+            "deployed_at": self.deployed_at,
             "funded": str(self.funded),
             "fee_bps_at_funding": str(self.fee_bps_at_funding),
             "refund_enabled": str(self.refund_enabled),
