@@ -216,6 +216,8 @@ function initCreatePage() {
       const milestoneAmountsWei = amounts.map((a) => core.toGenWei(a));
       const refundEnabled = document.getElementById('d-refund-enabled').checked;
       const refundDelayHours = Number(document.getElementById('d-refund-delay').value || 0);
+      const evidenceWindowHours = Number(document.getElementById('d-evidence-window').value || 24);
+      const challengeWindowHours = Number(document.getElementById('d-challenge-window').value || 24);
       const contractAddress = await core.deployDeal({
         buyer,
         freelancer,
@@ -225,6 +227,8 @@ function initCreatePage() {
         createdAt: Date.now(),
         refundEnabled,
         refundDelaySeconds: refundEnabled ? Math.round(refundDelayHours * 3600) : 0,
+        disputeEvidenceWindowSeconds: Math.max(1, Math.round(evidenceWindowHours * 3600)),
+        approvalChallengeWindowSeconds: Math.max(1, Math.round(challengeWindowHours * 3600)),
       });
       if (!contractAddress) throw new Error('Deployment succeeded but no contract address was returned. Check the Deals feed shortly.');
       status.textContent = 'Deployed. Redirecting to fund the escrow…';
@@ -355,6 +359,7 @@ function renderMilestoneCard(address, m, d) {
   }
   if (status === 'approved') {
     actionsHtml += `<button class="btn btn--brass btn--sm act-claim-payment" data-index="${m.index}">Claim Payment</button>`;
+    actionsHtml += `<button class="btn btn--ghost btn--sm act-challenge" data-index="${m.index}">Challenge Approval (buyer)</button>`;
   }
   if (status === 'refunded') {
     actionsHtml += `<button class="btn btn--brass btn--sm act-claim-refund" data-index="${m.index}">Claim Refund</button>`;
@@ -437,6 +442,13 @@ function wireMilestoneActions(address, dealDetails) {
     await core.writeDeal(address, 'claim_payment', [index]);
   })));
 
+  document.querySelectorAll('.act-challenge').forEach((btn) => btn.addEventListener('click', () => runAction(address, async () => {
+    const index = Number(btn.dataset.index);
+    const confirmed = confirm('Challenge this approval as the buyer? This sends the milestone back into the dispute/evidence flow instead of letting the freelancer claim payment.');
+    if (!confirmed) throw new Error('Cancelled');
+    await core.writeDeal(address, 'challenge_approved_milestone', [index]);
+  })));
+
   document.querySelectorAll('.act-claim-refund').forEach((btn) => btn.addEventListener('click', () => runAction(address, async () => {
     const index = Number(btn.dataset.index);
     await core.writeDeal(address, 'claim_refund', [index]);
@@ -444,7 +456,7 @@ function wireMilestoneActions(address, dealDetails) {
 
   document.querySelectorAll('.act-timeout-refund').forEach((btn) => btn.addEventListener('click', () => runAction(address, async () => {
     const index = Number(btn.dataset.index);
-    await core.writeDeal(address, 'claim_timeout_refund', [index, Date.now()]);
+    await core.writeDeal(address, 'claim_timeout_refund', [index]);
   })));
 
   document.querySelectorAll('.act-cancel').forEach((btn) => btn.addEventListener('click', () => runAction(address, async () => {
